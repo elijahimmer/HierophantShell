@@ -1,4 +1,3 @@
-#include <errno.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -21,7 +20,7 @@ usage: %s\n\
 ";
 
 
-void run_command(int argc, char **argv) {
+void run_command(char *const argv[]) {
     pid_t pid;
     int wstatus;
 
@@ -30,12 +29,13 @@ void run_command(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
-    switch ((pid = fork())) {
+    switch (pid = fork()) {
         case -1:
             perror("fork");
             exit(EXIT_FAILURE);
         case 0:
             puts(argv[0]);
+
             if (execvp(argv[0], argv) == -1) {
                 perror(argv[0]);
                 exit(EXIT_FAILURE);
@@ -44,12 +44,12 @@ void run_command(int argc, char **argv) {
             exit(EXIT_SUCCESS);
         default:
             waitpid(pid, &wstatus, 0);
-            puts("Hello from main");
     }
 }
 
-int main(int argc, char *argv[]) {
+int main(const int argc, char *const argv[]) {
     char *name;
+    
     if (argc < 1) {
         name = "hsh";
     } else {
@@ -57,25 +57,32 @@ int main(int argc, char *argv[]) {
     }
 
     if (argc < 2) {
-        printf(HELP_MESSAGE, name);
         exit(EXIT_FAILURE);
     }
 
-    if (strcmp("--cmd", argv[1]) == 0) {
+    else if (strcmp("--help", argv[1]) == 0) {
+        printf(HELP_MESSAGE, name);
+    }
+
+    else if (strcmp("--cmd", argv[1]) == 0)
+    {
         if (argc < 3) {
             printf("Supply a command to run it!");
             exit(EXIT_FAILURE);
         }
 
-        char *args[argc - 2];
+        int argsc = argc - 1;
+        char *args[argsc];
 
-        for (int i = 2; i < argc; i++) {
+        int i = 2;
+
+        for (; i < argc; i++)
             args[i - 2] = argv[i];
-        }
 
-        run_command(argc - 2, args);
+        args[i - 2] = NULL;
 
-        exit(EXIT_SUCCESS);
+
+        run_command(args);
     }
 
     exit(EXIT_SUCCESS);

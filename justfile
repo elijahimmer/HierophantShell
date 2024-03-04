@@ -1,8 +1,13 @@
 
 name := "hsh"
+# ./{{name}} --cmd ls
+# gcc -g -Wall {{name}}.c -o {{name}}
 
 run: build
-    ./{{name}} --cmd ls
+    ./zig-out/bin/{{name}}
 
 build:
-    gcc -g -Wall {{name}}.c -o {{name}}
+    zig build
+
+test:
+    zig build test
