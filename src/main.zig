@@ -5,20 +5,33 @@ pub fn main() !void {
 
     const stdin = std.io.getStdIn().reader();
 
-    const alloc = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}) {};
+    const alloc = gpa.allocator();
+
+    try stdout.print("{s}", .{help_message});
     
     try bw.flush();
-    
-    var buf = try std.ArrayList(u8).initCapacity(alloc, 1024);
 
     while (true) {
-        try stdin.readUntilDelimiterArrayList(&buf, '\n', 1024);
-
-        try stdout.print(": {} \n", .{buf});
+        try stdout.print("hsh$ ", .{});
+        try bw.flush();
+        const buf = try stdin.readUntilDelimiterOrEofAlloc(alloc, '\n', 4098);
+        try stdout.print(": {any} \n", .{buf});
+        try bw.flush();
     }
 
     process.cleanExit();
 }
+
+const help_message =
+    \\HSH Help Message
+    \\usage:
+    \\    --help
+    \\        Display this message
+    \\    --cmd <command> [arg1] [arg2] ...
+    \\        run a shell command with arg.
+    \\
+;
 
 const std = @import("std");
 const process = std.process;
