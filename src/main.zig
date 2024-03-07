@@ -1,4 +1,17 @@
+
+fn sigHandler() void {
+    os.Sigaction
+}
+
+
+fn sigAction() void {
+}
+
 pub fn main() !void {
+
+    os.sigaction(os.SIG.QUIT, .{handler = sigHandler,
+    sigaction = sigAction,}, sigQuit2);
+
     const stdout_file = io.getStdOut();
     const stdout = stdout_file.writer();
     // Everything I print is direct, no need for buffer.
@@ -13,14 +26,21 @@ pub fn main() !void {
     var history_array = ArrayList([]const u8).init(allocator);
     defer history_array.deinit();
 
-    var last_status: u32 = 0;
+    var last_status: ?u32 = null;
 
     var config = tty.detectConfig(stdout_file);
+    try config.setColor(stdout_file, Color.reset);
+
     while (true) {
         try config.setColor(stdout_file, Color.cyan);
         try config.setColor(stdout_file, Color.bold);
 
-        try stdout.print("hsh {}$ ", .{last_status});
+        if (last_status) |ls| {
+            try stdout.print("hsh {}$ ", .{ls});
+        } else {
+            try stdout.print("hsh$ ", .{});
+        }
+
 
         try config.setColor(stdout_file, Color.reset);
 
@@ -30,7 +50,7 @@ pub fn main() !void {
         const command = mem.trim(u8, buf, &ascii.whitespace);
 
         if (ascii.eqlIgnoreCase(command, "exit")) {
-            try stdout.print("exiting...\n", .{});
+            try stdout.writeAll("exiting...\n");
             break;
         }
 
@@ -43,8 +63,12 @@ pub fn main() !void {
         defer arg_arr.deinit();
 
         last_status = run_command(allocator, arg_arr.items) catch |err| rcmd: {
-            try stdout.print("failed to run command: {}\n", .{err});
-            break :rcmd 0;
+            switch (err) {
+                RunCommandError.NoSuchCommand => {},
+                else => try stdout.print("failed to run command: {s}\n", .{@errorName(err)}),
+
+            }
+            break :rcmd null;
         };
     }
 
@@ -64,27 +88,23 @@ pub fn tokenize(allocator: Allocator, input: []const u8) Allocator.Error!ArrayLi
     return arr;
 }
 
+const RunCommandError = error {
+    NoSuchCommand,
+} || os.ForkError || process.ExecvError;
+
 //// Run a command given the argv
 //// TODO: Implement piping for input and output.
-pub fn run_command(allocator: Allocator, argv: []const []const u8) anyerror!u32 {
-    assert(argv.len > 0);
-    //var child = ChildProcess.init(argv, allocator);
-
-    //try child.spawn();
-
-    //_ = try child.wait();
-
-    _ = &allocator;
-    _ = &argv;
+pub fn run_command(allocator: Allocator, argv: []const []const u8) RunCommandError!u32 {
+    if (argv.len < 1) {
+        return RunCommandError.NoSuchCommand;
+    }
 
     const pid = try os.fork();
 
     if (pid == 0) {
         var err = process.execv(allocator, argv);
 
-        const stdout = io.getStdOut().writer();
-
-        try stdout.print("{s}: {s}\n", .{ argv[0], switch (err) {
+        std.debug.print("{s}: {s}\n", .{ argv[0], switch (err) {
             error.FileNotFound => "command not found",
             else => @errorName(err),
         } });
@@ -92,11 +112,14 @@ pub fn run_command(allocator: Allocator, argv: []const []const u8) anyerror!u32 
         os.exit(1);
     }
 
+    current_process = pid;
+
     const res = os.waitpid(pid, 0);
     return res.status;
 }
 
-//var current_process: ?pid_t = null;
+//// The current running process, kill this instead of the shell on ^C
+var current_process: ?os.pid_t = null;
 
 const CMD_HELP_MESSAGE =
     \\
