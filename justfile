@@ -4,7 +4,7 @@ name := "hsh"
 # gcc -g -Wall {{name}}.c -o {{name}}
 
 run: build
-    ./zig-out/bin/{{name}}
+    ./zig-out/bin/hsh
 
 build:
     zig build
