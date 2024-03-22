@@ -1,54 +1,48 @@
-pub fn tty_init(stdout_file: File) !void {
-    var tty_tmp: termios.termios = undefined;
-
-    switch (os.errno(termios.tcgetattr(stdout_file.handle, &tty_tmp))) {
-        .SUCCESS => {},
-        else => |err| {
-            try stdout_file.writer().print("Failed to get tty status: {}\n", .{err});
-            return;
-        },
-    }
-
-    tty_start = tty_tmp;
-
-    tty_tmp.c_lflag &= @bitCast(~(termios.ICANON | termios.VINTR));
-
-    tty_raw = tty_tmp;
-}
-
-pub fn set_start(stdout_file: File) !void {
-    if (current_mode == .Start) return;
-    if (tty_start) |start| {
-        switch (os.errno(termios.tcsetattr(stdout_file.handle, 0, &start))) {
-            .SUCCESS => current_mode = Mode.Start,
-            else => |err| try stdout_file.writer().print("Failed to set tty back from mode: {}\n", .{err}),
-        }
-    }
-}
-
-pub fn set_raw(stdout_file: File) !void {
-    if (current_mode == .Raw) return;
-    if (tty_raw) |raw| {
-        switch (os.errno(termios.tcsetattr(stdout_file.handle, 0, &raw))) {
-            .SUCCESS => current_mode = Mode.Raw,
-            else => |err| try stdout_file.writer().print("Failed to set tty to raw mode: {}\n", .{err}),
-        }
-    }
-}
-
-var tty_success = false;
-var tty_raw: ?termios.termios = null;
-var tty_start: ?termios.termios = null;
-
-const Mode = enum {
-    Raw,
-    Start,
+pub const Config = struct {
+    start: termios.termios,
+    raw: termios.termios,
 };
 
-var current_mode = Mode.Start;
+pub fn get(stdout_file: File) ?Config {
+    if (!isatty(stdout_file.handle)) {
+        return null;
+    }
 
+    var term_start: termios.termios = undefined;
+
+    switch (errno(termios.tcgetattr(stdout_file.handle, &term_start))) {
+        .SUCCESS => {},
+        else => return null,
+    }
+
+    last_start = term_start;
+
+    var term_raw = term_start;
+
+    term_raw.c_iflag &= @bitCast(~(termios.IGNBRK | termios.BRKINT | termios.PARMRK | termios.ISTRIP | termios.IXON));
+    term_raw.c_lflag &= @bitCast(~(termios.ECHO | termios.ECHONL | termios.ICANON | termios.ISIG | termios.IEXTEN));
+    term_raw.c_cflag &= @bitCast(~(termios.CSIZE | termios.PARENB));
+    term_raw.c_cflag |= @bitCast(termios.CS8);
+
+    return .{
+        .start = term_start,
+        .raw = term_raw,
+    };
+}
+
+/// Sets the stdout file's file mode.
+pub fn set(stdout_file: File, mode: *const termios.termios) void {
+    // dis guard the errno if it fails.
+    _ = termios.tcsetattr(stdout_file.handle, 0, mode);
+}
+
+pub var last_start: ?termios.termios = null;
+
+/// std library package
 const std = @import("std");
-const os = std.os;
+const errno = std.os.errno;
 const File = std.fs.File;
+const isatty = std.os.isatty;
 
+/// glibc termios include
 const termios = @cImport(@cInclude("termios.h"));
