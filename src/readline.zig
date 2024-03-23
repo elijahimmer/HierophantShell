@@ -207,9 +207,6 @@ const nil = @as(void, undefined);
 /// ./shell_prompt.zig
 const shellPrompt = @import("shell_prompt.zig").shellPrompt;
 
-/// ./utils.zig
-const utils = @import("utils.zig");
-
 /// ./term.zig
 const term = @import("term.zig");
 

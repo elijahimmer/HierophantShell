@@ -1,6 +1,6 @@
 pub const CMD_HELP_MESSAGE =
     \\
-    \\hsh Help Message
+    \\Hierophant SHell Help Message
     \\usage:
     \\    --help
     \\        Display this message

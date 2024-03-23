@@ -14,9 +14,6 @@ pub fn shellPrompt(last_status: ?u32, o: anytype) !void {
     try o.buf.flush();
 }
 
-///
-const Out = @import("utils.zig").Out;
-
 /// Std lib includes
 const std = @import("std");
 

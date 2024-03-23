@@ -43,9 +43,6 @@ pub fn emergencyResetTerm() void {
     }
 }
 
-/// ./utils.zig
-const Out = @import("utils.zig").Out;
-
 /// std library package
 const std = @import("std");
 const os = std.os;

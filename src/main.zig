@@ -1,7 +1,7 @@
 pub fn main() !void {
     resetOnSigInt();
 
-    const stdout_file = getStdOut();
+    const stdout_file = io.getStdOut();
     var stdout_buf = io.bufferedWriter(stdout_file.writer());
     const stdout = stdout_buf.writer();
 
@@ -69,7 +69,7 @@ pub fn main() !void {
 
         const last_status = run.run(history_alloc, arg_arr.items) catch |err| rcmd: {
             switch (err) {
-                run.RunError.NoSuchCommand => {},
+                error.NoSuchCommand => {},
                 else => try stdout.print("\nfailed to run command: {s}\n", .{@errorName(err)}),
             }
             break :rcmd null;
@@ -79,6 +79,7 @@ pub fn main() !void {
     }
 }
 
+/// Clones the history ArrayList into a mutable double ArrayList
 fn clone_history(alloc: Allocator, history: *ArrayList([]const u8)) Allocator.Error!ArrayList(ArrayList(u8)) {
     var history_clone = try ArrayList(ArrayList(u8)).initCapacity(alloc, history.capacity + 1);
 
@@ -95,7 +96,7 @@ fn clone_history(alloc: Allocator, history: *ArrayList([]const u8)) Allocator.Er
     return history_clone;
 }
 
-/// Overrides the default panic
+/// Overrides the default panic to reset terminal mode
 pub fn panic(message: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
     term.emergencyResetTerm();
 
@@ -118,8 +119,11 @@ fn sigIntHandle(sig: c_int) callconv(.C) void {
     _ = sig;
 
     if (run.current_process) |pid| {
+        os.kill(pid, os.SIG.INT) catch |err| {
+            std.debug.print("failed to kill {}: {s}", .{ pid, @errorName(err) });
+        };
         run.current_process = null;
-        os.kill(pid, os.SIG.INT) catch {};
+        std.debug.print("\n", .{});
     } else {
         term.emergencyResetTerm();
         os.exit(0);
@@ -150,5 +154,4 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const ArrayList = std.ArrayList;
 const File = std.fs.File;
 
-const getStdOut = std.io.getStdOut;
 const whitespace = std.ascii.whitespace;
