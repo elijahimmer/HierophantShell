@@ -1,19 +1,19 @@
 const ParseStateTag = enum {
     normal,
-    escaped, // ^[
-    esc_code, // ^[[
-    esc_count, // ^[[a
-    esc_extend, // ^[[a;
-    esc_double, // ^[[a;b
+    escaped, // ^[{char}
+    esc_code, // ^[[{char}
+    esc_count, // ^[[a{char}
+    esc_extend, // ^[[a;{char}
+    esc_double, // ^[[a;b{char}
 };
 
 const ParseState = union(ParseStateTag) {
     normal: void,
-    escaped: void, // ^[
-    esc_code: void, // ^[[
-    esc_count: u8, // ^[[a
-    esc_extend: u8, // ^[[a;
-    esc_double: struct { // ^[[a;b
+    escaped: void, // ^[{char}
+    esc_code: void, // ^[[{char}
+    esc_count: u8, // ^[[a{char}
+    esc_extend: u8, // ^[[a;{char}
+    esc_double: struct { // ^[[a;b{char}
         a: u8,
         b: u8,
     },
@@ -27,7 +27,6 @@ pub const ReadLineError = error{
 pub const History = ArrayList(ArrayList(u8));
 
 pub fn readline(history: *History, o: anytype) ReadLineError!*ArrayList(u8) {
-    defer o.buf.flush() catch {};
     try shellPrompt(null, o);
     const stdin = io.getStdIn().reader();
 
@@ -66,9 +65,7 @@ pub fn readline(history: *History, o: anytype) ReadLineError!*ArrayList(u8) {
 
                             return error.SIGINT;
                         },
-                        27 => { // Escape (^[)
-                            parse_state = .escaped;
-                        },
+                        27 => parse_state = .escaped, // Escape (^[)
                         '\n' => {
                             try o.out.print("\n", .{});
                             break;

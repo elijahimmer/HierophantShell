@@ -48,7 +48,7 @@ pub fn readline(history: *History, out: anytype) ReadLineError!*ArrayList(u8) {
     };
 
     while (true) {
-        try out.buf.flush();
+        defer try out.buf.flush();
 
         const i = stdin.readByte() catch |err| switch (err) {
             error.EndOfStream => break,

@@ -21,6 +21,8 @@ pub fn get(stdout_file: File) ?Config {
 
     term_raw.c_iflag &= @bitCast(~(termios.IGNBRK | termios.BRKINT | termios.PARMRK | termios.ISTRIP));
     term_raw.c_lflag &= @bitCast(~(termios.ECHO | termios.ICANON | termios.ISIG));
+    term_raw.c_cflag &= @bitCast(~(termios.CSIZE | termios.PARENB));
+    term_raw.c_cflag |= @bitCast(termios.CS8);
 
     return .{
         .start = term_start,
