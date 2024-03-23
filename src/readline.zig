@@ -99,8 +99,8 @@ pub fn readline(history: *History, o: anytype) ReadLineError!*ArrayList(u8) {
                 switch (char) {
                     '[' => parse_state = .{ .esc_code = nil },
                     else => {
-                        try o.out.print("^[{c}", .{char});
                         parse_state = .{ .normal = nil };
+                        try o.out.print("^[{c}", .{char});
                     },
                 }
             },
@@ -108,13 +108,16 @@ pub fn readline(history: *History, o: anytype) ReadLineError!*ArrayList(u8) {
                 parse_state = .{ .normal = nil };
                 switch (char) {
                     '0'...'9' => parse_state = .{ .esc_count = char - '0' },
-                    'A', 'B' => { // Up and Down Movement
-                        if (char == 'A') {
-                            history_idx -|= 1;
-                        } else {
-                            if (history_idx < history.items.len - 1) {
+                    'A', 'B', 'H', 'F' => { // History movement Up, Down, Home, End
+                        parse_state = .{ .normal = nil };
+                        switch (char) {
+                            'A' => history_idx -|= 1,
+                            'B' => if (history_idx < history.items.len - 1) {
                                 history_idx += 1;
-                            }
+                            },
+                            'H' => history_idx = 0,
+                            'F' => history_idx = history.items.len - 1,
+                            else => unreachable,
                         }
 
                         const len_prev = line_curr.items.len;
@@ -126,9 +129,9 @@ pub fn readline(history: *History, o: anytype) ReadLineError!*ArrayList(u8) {
                             try o.out.print("\u{1B}[{}D", .{len_prev});
                         }
                         try o.out.print("\u{1B}[0K{s}", .{line_curr.items});
-                        parse_state = .{ .normal = nil };
                     },
                     'C', 'D' => { // Left and Right movement
+                        parse_state = .{ .normal = nil };
                         if (char == 'D') {
                             if (cursor_pos > 0) {
                                 cursor_pos -= 1;
@@ -140,17 +143,24 @@ pub fn readline(history: *History, o: anytype) ReadLineError!*ArrayList(u8) {
                                 try o.out.print("\u{1B}[1C", .{});
                             }
                         }
-                        parse_state = .{ .normal = nil };
                     },
                     else => {
-                        try o.out.print("^[[{c}", .{char});
                         parse_state = .{ .normal = nil };
+                        try o.out.print("^[[{c}", .{char});
                     },
                 }
             },
             .esc_count => { // ^[[a{char}
                 switch (char) {
-                    ';' => parse_state = .{ .esc_extend = parse_state.esc_count },
+                    ';' => parse_state = .{ .esc_extend = parse_state.esc_count }, // continue to double
+                    '~' => { // delete
+                        parse_state = .{ .normal = nil };
+                        if (cursor_pos < line_curr.items.len) {
+                            _ = line_curr.orderedRemove(cursor_pos);
+
+                            print_line = true;
+                        }
+                    },
                     else => {
                         try o.out.print("^[[{}{c}", .{ parse_state.esc_count, char });
                         parse_state = .{ .normal = nil };
