@@ -19,10 +19,8 @@ pub fn get(stdout_file: File) ?Config {
 
     var term_raw = term_start;
 
-    term_raw.c_iflag &= @bitCast(~(termios.IGNBRK | termios.BRKINT | termios.PARMRK | termios.ISTRIP | termios.IXON));
-    term_raw.c_lflag &= @bitCast(~(termios.ECHO | termios.ECHONL | termios.ICANON | termios.ISIG | termios.IEXTEN));
-    term_raw.c_cflag &= @bitCast(~(termios.CSIZE | termios.PARENB));
-    term_raw.c_cflag |= @bitCast(termios.CS8);
+    term_raw.c_iflag &= @bitCast(~(termios.IGNBRK | termios.BRKINT | termios.PARMRK | termios.ISTRIP));
+    term_raw.c_lflag &= @bitCast(~(termios.ECHO | termios.ICANON | termios.ISIG));
 
     return .{
         .start = term_start,
@@ -36,10 +34,19 @@ pub fn set(stdout_file: File, mode: *const termios.termios) void {
     _ = termios.tcsetattr(stdout_file.handle, 0, mode);
 }
 
-pub var last_start: ?termios.termios = null;
+var last_start: ?termios.termios = null;
+pub fn emergencyResetTerm() void {
+    if (last_start) |ls| {
+        set(std.io.getStdOut(), &ls);
+    }
+}
+
+/// ./utils.zig
+const Out = @import("utils.zig").Out;
 
 /// std library package
 const std = @import("std");
+const os = std.os;
 const errno = std.os.errno;
 const File = std.fs.File;
 const isatty = std.os.isatty;

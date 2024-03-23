@@ -1,116 +1,200 @@
-const ParseState = enum {
-    Normal,
-    Escaped,
-    EscapeCode,
+const ParseStateTag = enum {
+    normal,
+    escaped, // ^[
+    esc_code, // ^[[
+    esc_count, // ^[[a
+    esc_extend, // ^[[a;
+    esc_double, // ^[[a;b
 };
 
-///
-pub fn readline(allocator: Allocator, history: ArrayList([]const u8), out: utils.Out) ![]const u8 {
-    try shellPrompt(null, out);
+const ParseState = union(ParseStateTag) {
+    normal: void,
+    escaped: void, // ^[
+    esc_code: void, // ^[[
+    esc_count: u8, // ^[[a
+    esc_extend: u8, // ^[[a;
+    esc_double: struct { // ^[[a;b
+        a: u8,
+        b: u8,
+    },
+};
+
+pub const ReadLineError = error{
+    SIGINT,
+    EndOfStream, // TODO: include the error that contains this, not just this.
+} || os.WriteError || Allocator.Error || os.ReadError;
+
+pub const History = ArrayList(ArrayList(u8));
+
+pub fn readline(history: *History, o: anytype) ReadLineError!*ArrayList(u8) {
+    defer o.buf.flush() catch {};
+    try shellPrompt(null, o);
     const stdin = io.getStdIn().reader();
 
-    var buf = ArrayList(u8).init(allocator);
-    defer buf.deinit();
-
-    var parse_state: ParseState = .Normal;
-    var history_idx: usize = 0;
     var cursor_pos: usize = 0;
+    var history_idx: usize = history.items.len - 1;
+    var print_line = false;
 
-    const term_config = term.get(out.file);
+    var line_curr = &history.items[history_idx];
+
+    var parse_state = ParseState{ .normal = nil };
+
+    const term_config = term.get(o.file);
 
     if (term_config) |c| {
-        term.set(out.file, &c.raw);
+        term.set(o.file, &c.raw);
     }
 
     defer if (term_config) |c| {
-        term.set(out.file, &c.start);
+        term.set(o.file, &c.start);
     };
 
     while (true) {
-        const i = stdin.readByte() catch |err| switch (err) {
+        try o.buf.flush();
+
+        const char = stdin.readByte() catch |err| switch (err) {
             error.EndOfStream => break,
-            else => {
-                try out.w.print("Failed to read from stdin: {s}\n", .{@errorName(err)});
-                continue;
-            },
+            else => return err,
         };
 
         switch (parse_state) {
-            .Normal => {
-                switch (i) {
-                    3 => { // handle ^C
-                        try out.w.print("\n", .{});
-                        return readline(allocator, history, out);
-                    },
-                    27 => {
-                        parse_state = .Escaped;
-                        continue;
-                    },
-                    '\n' => {
-                        try out.w.print("\n", .{});
-                        break;
-                    },
-                    else => try buf.insert(cursor_pos, i),
-                }
-                cursor_pos +|= 1;
-                try out.w.print("{c}", .{i});
-            },
-            .Escaped => {
-                if (i == '[') {
-                    parse_state = .EscapeCode;
-                }
-            },
-            .EscapeCode => {
-                switch (i) {
-                    // up or down
-                    'A', 'B' => |c| {
-                        if (c == 'A') {
-                            history_idx +|= 1;
+            .normal => { // {char}
+                if (ascii.isControl(char)) {
+                    switch (char) {
+                        3 => { // ^C
+                            try o.out.print("\n", .{});
 
-                            if (history_idx >= history.items.len) {
-                                history_idx = history.items.len;
+                            return error.SIGINT;
+                        },
+                        27 => { // Escape (^[)
+                            parse_state = .escaped;
+                        },
+                        '\n' => {
+                            try o.out.print("\n", .{});
+                            break;
+                        },
+                        0x7f => { // backspace
+                            if (cursor_pos > 0) {
+                                cursor_pos -= 1;
+                                _ = line_curr.orderedRemove(cursor_pos);
+
+                                print_line = true;
+                                try o.out.print("\u{1B}[1D", .{});
+                            }
+                        },
+                        else => {
+                            try o.out.print("{x}", .{char});
+                        },
+                    }
+                } else {
+                    try line_curr.insert(cursor_pos, char);
+
+                    cursor_pos +|= 1;
+                    if (cursor_pos > line_curr.items.len) {
+                        cursor_pos = line_curr.items.len -| 1;
+                    }
+
+                    try o.out.print("{c}", .{char});
+                    print_line = true;
+                }
+            },
+            .escaped => { // ^[{char}
+                switch (char) {
+                    '[' => parse_state = .{ .esc_code = nil },
+                    else => {
+                        try o.out.print("^[{c}", .{char});
+                        parse_state = .{ .normal = nil };
+                    },
+                }
+            },
+            .esc_code => { // ^[[{char}
+                parse_state = .{ .normal = nil };
+                switch (char) {
+                    '0'...'9' => parse_state = .{ .esc_count = char - '0' },
+                    'A', 'B' => { // Up and Down Movement
+                        if (char == 'A') {
+                            history_idx -|= 1;
+                        } else {
+                            if (history_idx < history.items.len - 1) {
+                                history_idx += 1;
+                            }
+                        }
+
+                        const len_prev = line_curr.items.len;
+
+                        line_curr = &history.items[history_idx];
+                        cursor_pos = line_curr.items.len;
+
+                        if (len_prev > 0) {
+                            try o.out.print("\u{1B}[{}D", .{len_prev});
+                        }
+                        try o.out.print("\u{1B}[0K{s}", .{line_curr.items});
+                        parse_state = .{ .normal = nil };
+                    },
+                    'C', 'D' => { // Left and Right movement
+                        if (char == 'D') {
+                            if (cursor_pos > 0) {
+                                cursor_pos -= 1;
+                                try o.out.print("\u{1B}[1D", .{});
                             }
                         } else {
-                            history_idx -|= 1;
+                            if (cursor_pos < line_curr.items.len) {
+                                cursor_pos += 1;
+                                try o.out.print("\u{1B}[1C", .{});
+                            }
                         }
-
-                        try out.w.print("\r\u{001b}[0J", .{});
-                        try shellPrompt(null, out);
-
-                        if (history.items.len != 0 and history_idx != 0) {
-                            try out.w.print("{s}", .{history.items[history_idx - 1]});
-                            cursor_pos = history.items[history_idx - 1].len;
-                        } else {
-                            try out.w.print("{s}", .{buf.items});
-                            cursor_pos = buf.items.len;
-                        }
-
-                        parse_state = .Normal;
-                    },
-                    // Left or Right
-                    'C', 'D' => |c| {
-                        if (c == 'C') {
-                            cursor_pos +|= 1;
-                            if (cursor_pos > )
-                        } else {
-                            cursor_pos -|= 1;
-                        }
-                        try out.w.print("\r\u{001b}[{c}", .{c});
-
-                        parse_state = .Normal;
+                        parse_state = .{ .normal = nil };
                     },
                     else => {
-                        try out.w.print("ESC[{c}", .{i});
-
-                        parse_state = .Normal;
+                        try o.out.print("^[[{c}", .{char});
+                        parse_state = .{ .normal = nil };
                     },
                 }
             },
+            .esc_count => { // ^[[a{char}
+                switch (char) {
+                    ';' => parse_state = .{ .esc_extend = parse_state.esc_count },
+                    else => {
+                        try o.out.print("^[[{}{c}", .{ parse_state.esc_count, char });
+                        parse_state = .{ .normal = nil };
+                    },
+                }
+            },
+            .esc_extend => { // ^[[a;{char}
+                switch (char) {
+                    '0'...'9' => parse_state = .{
+                        .esc_double = .{
+                            .a = parse_state.esc_extend,
+                            .b = char - '0',
+                        },
+                    },
+                    else => {
+                        try o.out.print("^[[{};{c}", .{ parse_state.esc_count, char });
+                        parse_state = .{ .normal = nil };
+                    },
+                }
+            },
+            .esc_double => { // ^[[a;b{char}
+                try o.out.print("^[[{};{}{c}", .{ parse_state.esc_double.a, parse_state.esc_double.b, char });
+                parse_state = .{ .normal = nil };
+            },
+        }
+
+        if (print_line) {
+            const len = line_curr.items.len - cursor_pos;
+
+            try o.out.print("\u{1B}[0K{s}", .{line_curr.items[cursor_pos..]});
+
+            if (len > 0) {
+                try o.out.print("\u{1B}[{}D", .{len});
+            }
         }
     }
 
-    return buf.toOwnedSlice();
+    return line_curr;
 }
+
+const nil = @as(void, undefined);
 
 /// ./shell_prompt.zig
 const shellPrompt = @import("shell_prompt.zig").shellPrompt;
@@ -121,12 +205,12 @@ const utils = @import("utils.zig");
 /// ./term.zig
 const term = @import("term.zig");
 
-/// std library package
+/// Std lib
 const std = @import("std");
+const os = std.os;
 const io = std.io;
-const fs = std.fs;
-const mem = std.mem;
-const tty = io.tty;
 const ascii = std.ascii;
+
+const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
-const Allocator = mem.Allocator;
+const File = std.fs.File;

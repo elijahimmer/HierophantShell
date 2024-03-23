@@ -1,37 +1,124 @@
+pub fn Out(comptime buf: type, comptime out: type) type {
+    return struct {
+        file: File,
+        buf: buf,
+        out: out,
+        config: std.io.tty.Config,
+    };
+}
+
 pub fn main() !void {
+    resetOnSigInt();
 
-    // Everything I print is direct, no need for buffer.
+    const stdout_file = getStdOut();
+    var stdout_buf = io.bufferedWriter(stdout_file.writer());
+    const stdout = stdout_buf.writer();
 
-    // For non-libc allocating
-    //var gpalloc = std.heap.GeneralPurposeAllocator(.{}){};
-    //defer _ = gpalloc.deinit();
-
-    //const allocator = gpalloc.allocator();
-
-    const allocator = std.heap.c_allocator;
-
-    const stdout_file = io.getStdOut();
-    const stdout = stdout_file.writer();
-    const out = utils.Out{
+    var o = Out(@TypeOf(&stdout_buf), @TypeOf(stdout)){
         .file = stdout_file,
-        .w = stdout,
-        .config = ttyDetectConfig(stdout_file),
+        .buf = &stdout_buf,
+        .out = stdout,
+        .config = std.io.tty.detectConfig(stdout_file),
     };
 
-    var history_array = ArrayList([]const u8).init(allocator);
-    defer history_array.deinit();
+    // General allocator
+    //const allocator = std.heap.c_allocator;
+
+    var gpalloc = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpalloc.deinit();
+
+    const allocator = gpalloc.allocator();
+
+    // History Arena
+    var history_arena = ArenaAllocator.init(allocator);
+    defer history_arena.deinit();
+
+    const history_alloc = history_arena.allocator();
+
+    var history = ArrayList([]const u8).init(history_alloc);
+
+    // Clone History Arena
+    var arena = ArenaAllocator.init(allocator);
+    defer arena.deinit();
 
     while (true) {
-        const line = try readline(allocator, history_array, out);
-        const command = mem.trim(u8, line, &whitespace);
+        // Ignore whether or not the retain worked.
+        _ = arena.reset(.retain_capacity);
+
+        var history_clone = try clone_history(arena.allocator(), &history);
+
+        const command_raw = readline(&history_clone, &o) catch |err| {
+            switch (err) {
+                error.SIGINT => continue,
+                else => return err,
+            }
+        };
+
+        const command_buf = try history_alloc.alloc(u8, command_raw.items.len);
+
+        @memcpy(command_buf, command_raw.items);
+
+        const command = mem.trim(u8, command_buf, &whitespace);
+
+        if (command.len == 0) continue;
+
+        try history.append(command);
+
+        try stdout.print("\t{}: '{s}'\n", .{ command.len, command });
 
         if (mem.eql(u8, command, "exit")) {
-            break;
+            return;
         }
+    }
+}
 
-        if (command.len > 0) {
-            try history_array.insert(0, command);
-        }
+fn clone_history(alloc: Allocator, history: *ArrayList([]const u8)) Allocator.Error!ArrayList(ArrayList(u8)) {
+    var history_clone = try ArrayList(ArrayList(u8)).initCapacity(alloc, history.capacity + 1);
+
+    for (history.items) |command| {
+        var line = try ArrayList(u8).initCapacity(alloc, command.len);
+
+        line.appendSliceAssumeCapacity(command);
+
+        history_clone.appendAssumeCapacity(line);
+    }
+
+    history_clone.appendAssumeCapacity(ArrayList(u8).init(alloc));
+
+    return history_clone;
+}
+
+/// Overrides the default panic
+pub fn panic(message: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
+    term.emergencyResetTerm();
+
+    std.builtin.default_panic(message, error_return_trace, ret_addr);
+}
+
+/// The current running process, kill this instead of the shell on ^C
+pub var current_process: ?os.pid_t = null;
+
+/// Sets a sigaction on SIGINT to fix the terminal's mode
+pub fn resetOnSigInt() void {
+    os.sigaction(os.SIG.INT, &os.Sigaction{
+        .handler = .{
+            .handler = sigIntHandle,
+        },
+        .mask = .{0} ** 32,
+        .flags = 0,
+    }, null) catch {};
+}
+
+/// Catch a signal and kill the child process if one exists
+fn sigIntHandle(sig: c_int) callconv(.C) void {
+    _ = sig;
+
+    if (current_process) |pid| {
+        current_process = null;
+        os.kill(pid, os.SIG.INT) catch {};
+    } else {
+        term.emergencyResetTerm();
+        os.exit(0);
     }
 }
 
@@ -46,10 +133,14 @@ const term = @import("term.zig");
 
 /// std library package
 const std = @import("std");
-const io = std.io;
 const mem = std.mem;
-const ttyDetectConfig = io.tty.detectConfig;
-const whitespace = std.ascii.whitespace;
+const os = std.os;
+const io = std.io;
 
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 const ArrayList = std.ArrayList;
+const File = std.fs.File;
+
+const getStdOut = std.io.getStdOut;
+const whitespace = std.ascii.whitespace;
