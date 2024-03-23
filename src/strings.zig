@@ -1,4 +1,4 @@
-const CMD_HELP_MESSAGE =
+pub const CMD_HELP_MESSAGE =
     \\
     \\hsh Help Message
     \\usage:
@@ -10,7 +10,7 @@ const CMD_HELP_MESSAGE =
     \\
 ;
 
-const HELP_MESSAGE =
+pub const HELP_MESSAGE =
     \\
     \\help: prints this message
     \\exit: exits the shell

@@ -1,12 +1,3 @@
-pub fn Out(comptime buf: type, comptime out: type) type {
-    return struct {
-        file: File,
-        buf: buf,
-        out: out,
-        config: std.io.tty.Config,
-    };
-}
-
 pub fn main() !void {
     resetOnSigInt();
 
@@ -14,7 +5,7 @@ pub fn main() !void {
     var stdout_buf = io.bufferedWriter(stdout_file.writer());
     const stdout = stdout_buf.writer();
 
-    var o = Out(@TypeOf(&stdout_buf), @TypeOf(stdout)){
+    var o = .{
         .file = stdout_file,
         .buf = &stdout_buf,
         .out = stdout,
@@ -64,11 +55,27 @@ pub fn main() !void {
 
         try history.append(command);
 
-        try stdout.print("\t{}: '{s}'\n", .{ command.len, command });
+        //try stdout.print("\t{}: '{s}'\n", .{ command.len, command });
 
-        if (mem.eql(u8, command, "exit")) {
+        if (ascii.eqlIgnoreCase(command, "exit")) {
             return;
         }
+
+        if (ascii.eqlIgnoreCase(command, "help")) {
+            try stdout.print("{s}\n", .{strings.HELP_MESSAGE});
+        }
+
+        var arg_arr = try run.tokenize(history_alloc, command);
+
+        const last_status = run.run(history_alloc, arg_arr.items) catch |err| rcmd: {
+            switch (err) {
+                run.RunError.NoSuchCommand => {},
+                else => try stdout.print("\nfailed to run command: {s}\n", .{@errorName(err)}),
+            }
+            break :rcmd null;
+        };
+
+        _ = last_status;
     }
 }
 
@@ -95,9 +102,6 @@ pub fn panic(message: []const u8, error_return_trace: ?*std.builtin.StackTrace, 
     std.builtin.default_panic(message, error_return_trace, ret_addr);
 }
 
-/// The current running process, kill this instead of the shell on ^C
-pub var current_process: ?os.pid_t = null;
-
 /// Sets a sigaction on SIGINT to fix the terminal's mode
 pub fn resetOnSigInt() void {
     os.sigaction(os.SIG.INT, &os.Sigaction{
@@ -113,8 +117,8 @@ pub fn resetOnSigInt() void {
 fn sigIntHandle(sig: c_int) callconv(.C) void {
     _ = sig;
 
-    if (current_process) |pid| {
-        current_process = null;
+    if (run.current_process) |pid| {
+        run.current_process = null;
         os.kill(pid, os.SIG.INT) catch {};
     } else {
         term.emergencyResetTerm();
@@ -122,20 +126,24 @@ fn sigIntHandle(sig: c_int) callconv(.C) void {
     }
 }
 
+/// ./strings.zig
+const strings = @import("strings.zig");
+
 /// ./readline.zig
 const readline = @import("readline.zig").readline;
 
-/// ./utils.zig
-const utils = @import("utils.zig");
-
 /// ./term.zig
 const term = @import("term.zig");
+
+/// ./run.zig
+const run = @import("run.zig");
 
 /// std library package
 const std = @import("std");
 const mem = std.mem;
 const os = std.os;
 const io = std.io;
+const ascii = std.ascii;
 
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;

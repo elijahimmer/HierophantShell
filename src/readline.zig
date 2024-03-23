@@ -27,6 +27,7 @@ pub const ReadLineError = error{
 pub const History = ArrayList(ArrayList(u8));
 
 pub fn readline(history: *History, o: anytype) ReadLineError!*ArrayList(u8) {
+    defer o.buf.flush() catch {};
     try shellPrompt(null, o);
     const stdin = io.getStdIn().reader();
 
