@@ -55,27 +55,37 @@ pub fn main() !void {
 
         try history.append(command);
 
-        //try stdout.print("\t{}: '{s}'\n", .{ command.len, command });
-
-        if (ascii.eqlIgnoreCase(command, "exit")) {
-            return;
-        }
+        if (ascii.eqlIgnoreCase(command, "exit")) return;
 
         if (ascii.eqlIgnoreCase(command, "help")) {
             try stdout.print("{s}\n", .{strings.HELP_MESSAGE});
         }
 
-        var arg_arr = try run.tokenize(history_alloc, command);
-
-        const last_status = run.run(history_alloc, arg_arr.items) catch |err| rcmd: {
-            switch (err) {
-                error.NoSuchCommand => {},
-                else => try stdout.print("\nfailed to run command: {s}\n", .{@errorName(err)}),
-            }
-            break :rcmd null;
+        const commands = tokenize.tokenize(history_alloc, command) catch |err| {
+            try tokenize.printError(stdout, err);
+            continue;
         };
 
-        _ = last_status;
+        try stdout.print("{any}\n", .{commands});
+
+        for (commands) |com| {
+            //for (.{ com.input, com.output }, .{ "input", "output" }) |a, s| {
+            //    try stdout.print("input: {any}\noutput: {any}\n", .{ com.input, com.output });
+            //    if (@as(tokenize.IOTypeTag, a) == .file) {
+            //        try stdout.print("{s}: {s}", s, a);
+            //    }
+            //}
+
+            const last_status = run.run(history_alloc, com.argv) catch |err| rcmd: {
+                switch (err) {
+                    error.NoSuchCommand => {},
+                    else => try stdout.print("\nfailed to run command: {s}\n", .{@errorName(err)}),
+                }
+                break :rcmd null;
+            };
+
+            _ = last_status;
+        }
     }
 }
 
@@ -139,8 +149,8 @@ const readline = @import("readline.zig").readline;
 /// ./term.zig
 const term = @import("term.zig");
 
-/// ./run.zig
 const run = @import("run.zig");
+const tokenize = @import("./tokenize.zig");
 
 /// std library package
 const std = @import("std");

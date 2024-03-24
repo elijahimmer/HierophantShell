@@ -30,22 +30,30 @@ pub fn run(allocator: Allocator, argv: []const []const u8) RunError!u32 {
     return res.status;
 }
 
-/// Tokenize a string into the command's argv
-/// TODO: Implement it to follow quotes and other marks like pipes.
-/// TODO: Change to parse not just one command, but many
-pub fn tokenize(allocator: Allocator, input: []const u8) Allocator.Error!ArrayList([]const u8) {
-    var itr = mem.tokenize(u8, input, &whitespace);
-    var arr = try ArrayList([]const u8).initCapacity(allocator, 16);
+pub const IOTypeTag = enum {
+    normal,
+    pipe,
+    file,
+};
 
-    while (itr.next()) |val| {
-        try arr.append(val);
-    }
+pub const IOType = union(IOTypeTag) {
+    normal: void,
+    pipe: void,
+    file: []const u8,
+};
 
-    return arr;
-}
+pub const Command = struct {
+    input: IOType,
+    output: IOType,
+    argv: []const []const u8,
+};
 
 /// The current running process, kill this instead of the shell on ^C
 pub var current_process: ?os.pid_t = null;
+
+const nil = @as(void, undefined);
+
+const tokenize = @import("./tokenize").tokenize;
 
 /// std library package
 const std = @import("std");
@@ -56,3 +64,5 @@ const process = std.process;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const whitespace = std.ascii.whitespace;
+
+const expect = std.testing.expect;
